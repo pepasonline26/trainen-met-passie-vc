@@ -1266,187 +1266,30 @@ async function loadMotiv() {
 // ─── INIT ────────────────────────────────────────────────────────
 document.getElementById('workoutArea').innerHTML = `
   <div class="select-prompt">
-    <svg class="prompt-monkey" viewBox="0 0 100 100" xmlns="http://www.w3.org/2000/svg" style="width:80px;height:80px;display:block;margin:0 auto 12px">
-      <circle cx="50" cy="55" r="35" fill="#c8860a"/>
-      <circle cx="22" cy="40" r="16" fill="#c8860a"/>
-      <circle cx="78" cy="40" r="16" fill="#c8860a"/>
-      <circle cx="22" cy="40" r="10" fill="#f4c06f"/>
-      <circle cx="78" cy="40" r="10" fill="#f4c06f"/>
-      <ellipse cx="50" cy="68" rx="22" ry="16" fill="#f4c06f"/>
-      <circle cx="40" cy="50" r="5" fill="#222"/>
-      <circle cx="60" cy="50" r="5" fill="#222"/>
-      <circle cx="42" cy="48" r="2" fill="white"/>
-      <circle cx="62" cy="48" r="2" fill="white"/>
-      <ellipse cx="50" cy="64" rx="8" ry="5" fill="#c8860a"/>
-    </svg>
+    <div style="font-size:52px;margin-bottom:10px">👆</div>
     <div class="prompt-title">Kies je trainingsdag</div>
-    <div class="prompt-sub">Tik op een dag hierboven om je workout te starten. Je kunt 4 dagen per week vrij kiezen.</div>
+    <div class="prompt-sub">Tik op een dag hierboven om je workout te starten. 4 dagen per week, vrij te kiezen.</div>
   </div>`;
 
-// Ensure DOM is fully ready before rendering
-try {
-  renderVandaag();
-  renderTrainingen();
-} catch(e) {
-  console.error('Init error:', e);
-}
-loadMotiv();
-
-// ─── STRAVA INTEGRATION ──────────────────────────────────────
-let STRAVA_CLIENT_ID = '';
-const STRAVA_REDIRECT = window.location.origin;
-
-// Fetch Client ID from server on load
-let stravaConfigReady = false;
-
-async function loadStravaConfig() {
+// Run all init in correct order
+function initApp() {
+  try { renderVandaag(); } catch(e) { console.error('renderVandaag error:', e); }
+  try { renderTrainingen(); } catch(e) { console.error('renderTrainingen error:', e); }
+  try { loadMotiv(); } catch(e) { console.error('loadMotiv error:', e); }
   try {
-    const res = await fetch('/api/strava-config');
-    const data = await res.json();
-    if (data.clientId) {
-      STRAVA_CLIENT_ID = String(data.clientId).trim();
-      stravaConfigReady = true;
-      console.log('Strava config loaded:', STRAVA_CLIENT_ID);
-    }
-  } catch(e) {
-    console.warn('Strava config not available:', e);
-  }
-}
-
-async function stravaConnect() {
-  // If not loaded yet, fetch it now and wait
-  if (!stravaConfigReady) {
-    await loadStravaConfig();
-  }
-
-  if (!STRAVA_CLIENT_ID) {
-    alert('Kan Strava-configuratie niet laden. Controleer je internetverbinding en probeer opnieuw.');
-    return;
-  }
-
-  const scope = 'activity:write,activity:read_all';
-  const redirectUri = window.location.origin + window.location.pathname;
-  const url = 'https://www.strava.com/oauth/authorize'
-    + '?client_id=' + encodeURIComponent(STRAVA_CLIENT_ID)
-    + '&redirect_uri=' + encodeURIComponent(redirectUri)
-    + '&response_type=code'
-    + '&approval_prompt=auto'
-    + '&scope=' + scope;
-
-  console.log('Strava connect URL:', url);
-  window.location.href = url;
-}
-
-function getStravaToken() {
-  try { return localStorage.getItem('strava_token'); } catch(e) { return null; }
-}
-
-function isStravaConnected() {
-  return !!getStravaToken();
-}
-
-function updateStravaUI() {
-  const bar = document.getElementById('stravaConnectBar');
-  if (!bar) return;
-  if (isStravaConnected()) {
-    bar.style.display = 'flex';
-    bar.innerHTML = '<span style="font-size:12px;color:#FC4C02;font-weight:500">✓ Strava verbonden</span><button onclick="stravaDisconnect()" style="padding:5px 10px;background:none;border:1px solid #444;border-radius:8px;color:#888;font-size:11px;cursor:pointer">Loskoppelen</button>';
-  } else {
-    bar.style.display = 'flex';
-  }
-}
-
-function stravaDisconnect() {
-  try { localStorage.removeItem('strava_token'); localStorage.removeItem('strava_athlete'); } catch(e) {}
-  updateStravaUI();
-}
-
-async function uploadToStrava(workoutData, exChecks) {
-  const token = getStravaToken();
-  if (!token) return false;
-
-  const phase = PHASES[workoutData.phase];
-  const workout = phase.workouts[workoutData.workoutIdx];
-  const durationSeconds = 60 * 60; // 60 minuten
-
-  // Build activity description with all completed exercises
-  const warmupLines = getDailyWarmup(workoutData.isoDate).map((ex, i) =>
-    exChecks?.['w'+i] ? `✓ ${ex.n} ${ex.s}` : `○ ${ex.n} ${ex.s}`
-  ).join('\n');
-
-  const mainLines = workout.exercises.map((ex, i) =>
-    exChecks?.['m'+i] ? `✓ ${ex.n} ${ex.s}` : `○ ${ex.n} ${ex.s}`
-  ).join('\n');
-
-  const desc = [
-    `${phase.name} · ${phase.period}`,
-    `${workout.name} — ${workout.focus}`,
-    `Oefeningen: ${workoutData.done}/${workoutData.total} afgerond`,
-    '',
-    '── Warming up (15 min) ──',
-    warmupLines,
-    '',
-    `── Hoofdtraining (45 min) · ${workout.focus} ──`,
-    mainLines,
-    '',
-    'Trainen met Passie 💪',
-    '21 days is a habit · 90 days is a lifestyle'
-  ].join('\n');
-
-  const activityData = {
-    name: `Trainen met Passie — ${workout.name}`,
-    type: 'WeightTraining',
-    start_date_local: new Date().toISOString(),
-    elapsed_time: durationSeconds,
-    description: desc,
-    trainer: 1,
-    commute: 0
-  };
-
-  try {
-    const res = await fetch('/api/strava', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ token, activity: activityData })
+    loadStravaConfig().then(() => {
+      checkStravaCallback();
+      setTimeout(updateStravaUI, 100);
     });
-    const data = await res.json();
-    return data && data.id ? true : false;
-  } catch(e) {
-    console.error('Strava upload failed:', e);
-    return false;
-  }
+  } catch(e) { console.error('Strava init error:', e); }
 }
 
-// Check for Strava OAuth callback
-function checkStravaCallback() {
-  const params = new URLSearchParams(window.location.search);
-  const code = params.get('code');
-  if (!code) return;
-
-  // Exchange code for token via our proxy
-  fetch('/api/strava-auth', {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ code })
-  }).then(r => r.json()).then(data => {
-    if (data.access_token) {
-      try {
-        localStorage.setItem('strava_token', data.access_token);
-        localStorage.setItem('strava_athlete', JSON.stringify(data.athlete));
-      } catch(e) {}
-      // Clean URL
-      window.history.replaceState({}, '', window.location.pathname);
-      updateStravaUI();
-      alert('Strava succesvol verbonden! Je workouts worden voortaan automatisch geüpload.');
-    }
-  }).catch(e => console.error('Strava auth error:', e));
+// Wait for DOM to be ready
+if (document.readyState === 'loading') {
+  document.addEventListener('DOMContentLoaded', initApp);
+} else {
+  initApp();
 }
-
-loadStravaConfig().then(() => {
-  checkStravaCallback();
-  setTimeout(updateStravaUI, 100);
-});
-
 
 // ─── DATA EXPORT / IMPORT ────────────────────────────────────
 function exportData() {
